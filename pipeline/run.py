@@ -1,37 +1,55 @@
-"""Pipeline runner."""
-
-from __future__ import annotations
-
-import argparse
+import asyncio
+import hashlib
 import json
+import sys
+import time
 from pathlib import Path
 
-from pipeline.chunk import chunk_pack
-from pipeline.embed import build_embeddings
-from pipeline.validate import validate_pack
+from pipeline.extract import CrawlLimits, crawl, normalize_domain
+from pipeline.chunk import build_chunks
+
+PACKS_DIR = Path("packs")
 
 
-def run(url: str, pack_id: str = "example_pack") -> Path:
-    pack_dir = Path("packs") / pack_id
-    (pack_dir / "raw").mkdir(parents=True, exist_ok=True)
+def pack_id_for(url: str) -> str:
+    return hashlib.sha1(normalize_domain(url).encode()).hexdigest()[:12]
+
+
+def write_meta(pack_dir: Path, **fields) -> None:
+    path = pack_dir / "meta.json"
+    meta = json.loads(path.read_text()) if path.exists() else {}
+    meta.update(fields)
+    path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+
+async def build_pack(url: str) -> str:
+    pack_id = pack_id_for(url)
+    pack_dir = PACKS_DIR / pack_id
     (pack_dir / "build").mkdir(parents=True, exist_ok=True)
-    (pack_dir / "meta.json").write_text(json.dumps({"url": url}, indent=2), encoding="utf-8")
-    errors = validate_pack(pack_dir)
-    if errors:
-        raise RuntimeError("; ".join(errors))
-    chunks = chunk_pack(pack_dir)
-    (pack_dir / "build" / "chunks.json").write_text(json.dumps(chunks, indent=2), encoding="utf-8")
-    build_embeddings(pack_dir)
-    return pack_dir
 
+    write_meta(pack_dir, pack_id=pack_id, source_url=url,
+               created_at=time.time(), tier=0, error=None)
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("url")
-    parser.add_argument("--pack-id", default="example_pack")
-    args = parser.parse_args()
-    print(run(args.url, args.pack_id))
+    print(f"pack {pack_id}  ←  {url}")
+
+    started = time.monotonic()
+    result = await crawl(url, pack_dir / "raw", CrawlLimits(max_pages=25),
+                         on_progress=lambda n, total: print(f"  page {n}/{total}"))
+    print(f"  crawl: {result['pages']} pages in {time.monotonic() - started:.1f}s")
+
+    if result["error"]:
+        write_meta(pack_dir, error=result["error"])
+        print(f"  FAILED: {result['error']}")
+        return pack_id
+
+    chunks = build_chunks(pack_dir)
+    write_meta(pack_dir, pages=result["pages"], chunks=len(chunks))
+
+    lengths = sorted(len(c["source"]) for c in chunks)
+    print(f"  chunks: {len(chunks)}")
+    print(f"  chars:  min {lengths[0]} / median {lengths[len(lengths)//2]} / max {lengths[-1]}")
+    return pack_id
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(build_pack(sys.argv[1]))
