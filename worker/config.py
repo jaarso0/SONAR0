@@ -10,7 +10,7 @@ GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 GROQ_MODEL = "openai/gpt-oss-120b"
 
-STT_MODEL = "saaras:v2.5"
+STT_MODEL = "saarika:v2.5"
 TTS_MODEL = "bulbul:v2"
 TTS_SPEAKER = "anushka"
 LANGUAGE = "en-IN"

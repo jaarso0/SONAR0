@@ -4,8 +4,26 @@ from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli
 from livekit.plugins import openai, sarvam
 
 from worker import config
+import uuid
+from livekit.agents import MetricsCollectedEvent
+from worker.metrics import TurnRecorder
+
 
 logger = logging.getLogger("sonar")
+
+
+
+async def entrypoint(ctx: JobContext):
+    await ctx.connect()
+
+    session = AgentSession(...)
+    recorder = TurnRecorder(session_id=uuid.uuid4().hex[:8])
+
+    @session.on("metrics_collected")
+    def on_metrics(ev: MetricsCollectedEvent):
+        recorder.collect(ev.metrics)
+
+    await session.start(room=ctx.room, agent=Agent(instructions=config.PERSONA))
 
 
 def build_llm() -> openai.LLM:
