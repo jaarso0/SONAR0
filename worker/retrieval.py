@@ -1,32 +1,40 @@
-"""File-backed retrieval helpers for built packs."""
-
-from __future__ import annotations
-
 import json
 from pathlib import Path
-from typing import Any
+
+import numpy as np
+
+from embedding import embed_texts, query_text
 
 
 class FileRetriever:
-    def __init__(self, pack_dir: Path) -> None:
-        self.pack_dir = pack_dir
-        self.chunks_path = pack_dir / "build" / "chunks.json"
+    """Loads one pack into memory. Brute-force cosine — no index needed at this size."""
 
-    def load_chunks(self) -> list[dict[str, Any]]:
-        if not self.chunks_path.exists():
-            return []
-        return json.loads(self.chunks_path.read_text(encoding="utf-8"))
+    def __init__(self, pack_dir: Path, languages: list[str]):
+        self.chunks = {c["id"]: c
+                       for c in json.loads((pack_dir / "build" / "chunks.json")
+                                           .read_text(encoding="utf-8"))}
+        self.ids: dict[str, list[str]] = {}
+        self.matrices: dict[str, np.ndarray] = {}
 
-    def search(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
-        terms = query.lower().split()
-        scored: list[tuple[int, dict[str, Any]]] = []
-        for chunk in self.load_chunks():
-            text = str(chunk.get("text", "")).lower()
-            score = sum(text.count(term) for term in terms)
-            if score:
-                scored.append((score, chunk))
-        return [chunk for _, chunk in sorted(scored, key=lambda item: item[0], reverse=True)[:limit]]
+        for lang in languages:
+            index_path = pack_dir / "build" / f"index.{lang}.json"
+            vectors_path = pack_dir / "build" / f"vectors.{lang}.bin"
+            if not index_path.exists():
+                continue
+            ids = json.loads(index_path.read_text(encoding="utf-8"))
+            matrix = np.fromfile(vectors_path, dtype=np.float32).reshape(len(ids), -1)
+            self.ids[lang] = ids
+            self.matrices[lang] = matrix
 
+    def search(self, question: str, lang: str, k: int = 3) -> list[dict]:
+        if lang not in self.matrices:
+            lang = next(iter(self.matrices))
 
-def speculative_search(retriever: FileRetriever, query: str) -> list[dict[str, Any]]:
-    return retriever.search(query)
+        query_vector = embed_texts([query_text(question)])[0]
+        scores = self.matrices[lang] @ query_vector
+        top = np.argsort(-scores)[:k]
+
+        return [{"id": self.ids[lang][i],
+                 "score": float(scores[i]),
+                 "text": self.chunks[self.ids[lang][i]]["spoken"][lang]}
+                for i in top]

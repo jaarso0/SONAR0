@@ -1,29 +1,26 @@
 import worker.patches  # noqa: F401  — must precede livekit plugin imports
+
 import logging
-from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli
+import uuid
+from pathlib import Path
+
+from livekit.agents import (
+    Agent,
+    AgentSession,
+    JobContext,
+    MetricsCollectedEvent,
+    WorkerOptions,
+    cli,
+)
 from livekit.plugins import openai, sarvam
 
 from worker import config
-import uuid
-from livekit.agents import MetricsCollectedEvent
 from worker.metrics import TurnRecorder
-
+from worker.retrieval import FileRetriever
 
 logger = logging.getLogger("sonar")
 
-
-
-async def entrypoint(ctx: JobContext):
-    await ctx.connect()
-
-    session = AgentSession(...)
-    recorder = TurnRecorder(session_id=uuid.uuid4().hex[:8])
-
-    @session.on("metrics_collected")
-    def on_metrics(ev: MetricsCollectedEvent):
-        recorder.collect(ev.metrics)
-
-    await session.start(room=ctx.room, agent=Agent(instructions=config.PERSONA))
+PACK_ID = "a7d7c3c1a58a"
 
 
 def build_llm() -> openai.LLM:
@@ -52,24 +49,56 @@ def build_tts() -> sarvam.TTS:
     )
 
 
+class SonarAgent(Agent):
+    def __init__(self, retriever: FileRetriever, lang: str):
+        super().__init__(instructions=config.PERSONA)
+        self.retriever = retriever
+        self.lang = lang
+
+    async def on_user_turn_completed(self, turn_ctx, new_message) -> None:
+        question = new_message.text_content
+        print(">>> HOOK FIRED", repr(question))
+        if not question:
+            return
+
+        hits = self.retriever.search(question, self.lang, k=3)
+        hits = [h for h in hits if h["score"] > 0.75]
+        if not hits:
+            print(">>> no relevant context")
+            return
+        print(f">>> RETRIEVED {[round(h['score'], 3) for h in hits]}")
+
+        context = "\n".join(h["text"] for h in hits)
+        turn_ctx.add_message(
+            role="assistant",
+            content=f"Relevant information from the business:\n{context}",
+        )
+
+
 async def entrypoint(ctx: JobContext):
     await ctx.connect()
+
+    retriever = FileRetriever(Path("packs") / PACK_ID, ["en-IN", "hi-IN"])
+    recorder = TurnRecorder(session_id=uuid.uuid4().hex[:8])
 
     session = AgentSession(
         stt=build_stt(),
         llm=build_llm(),
         tts=build_tts(),
         turn_detection="stt",
-        min_endpointing_delay=0.07,
+        min_endpointing_delay=0.2,
+        min_interruption_duration=0.7,
+        min_interruption_words=2,
     )
 
-    await session.start(
-        room=ctx.room,
-        agent=Agent(instructions=config.PERSONA),
-    )
+    @session.on("metrics_collected")
+    def on_metrics(ev: MetricsCollectedEvent):
+        recorder.collect(ev.metrics)
+
+    await session.start(room=ctx.room, agent=SonarAgent(retriever, "en-IN"))
 
     await session.generate_reply(
-        instructions="Greet the user in one short sentence and ask what they need."
+        instructions="Greet the caller in one short sentence and ask how you can help."
     )
 
 
