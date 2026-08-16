@@ -64,7 +64,6 @@ def chunk_document(markdown: str, doc_id: str, source_url: str) -> list[dict]:
                 "heading_path": heading_path,
                 "source_url": source_url,
                 "source": body,
-                "spoken": {},
             })
             counter += 1
 

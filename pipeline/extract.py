@@ -18,7 +18,7 @@ USER_AGENT = "sonar-pipeline/0.1"
 
 @dataclass
 class CrawlLimits:
-    max_pages: int = 25
+    max_pages: int = 40
     max_seconds: float = 45.0
     exclude: list[str] = field(default_factory=lambda: [
         r"/blog/", r"/news", r"/careers", r"/privacy", r"/terms",

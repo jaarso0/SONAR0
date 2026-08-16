@@ -1,3 +1,10 @@
+"""Embeds chunk source text into one index.
+
+multilingual-e5 puts every language in a shared vector space, so a Hindi
+question retrieves an English passage directly — one index serves every
+language, and no part of the corpus is translated ahead of time.
+"""
+
 import json
 import sys
 from pathlib import Path
@@ -6,7 +13,6 @@ import numpy as np
 from fastembed import TextEmbedding
 
 MODEL_NAME = "intfloat/multilingual-e5-large"
-DIMENSIONS = 1024
 
 _model: TextEmbedding | None = None
 
@@ -18,9 +24,9 @@ def get_model() -> TextEmbedding:
     return _model
 
 
-def passage_text(chunk: dict, lang: str) -> str:
-    """What actually gets embedded: heading for topic signal, spoken text for content."""
-    return f"passage: {chunk['heading_path']}. {chunk['spoken'][lang]}"
+def passage_text(chunk: dict) -> str:
+    """Heading for topic signal, body for content — e5 wants the prefix."""
+    return f"passage: {chunk['heading_path']}. {chunk['source']}"
 
 
 def query_text(question: str) -> str:
@@ -33,30 +39,21 @@ def embed_texts(texts: list[str]) -> np.ndarray:
     return vectors / np.clip(norms, 1e-9, None)
 
 
-def build_vectors(pack_dir: Path, languages: list[str]) -> dict[str, int]:
-    chunks = json.loads((pack_dir / "build" / "chunks.json").read_text(encoding="utf-8"))
-    counts = {}
+def build_vectors(pack_dir: Path) -> int:
+    build_dir = pack_dir / "build"
+    chunks = json.loads((build_dir / "chunks.json").read_text(encoding="utf-8"))
+    if not chunks:
+        return 0
 
-    for lang in languages:
-        present = [c for c in chunks if lang in c.get("spoken", {})]
-        if not present:
-            print(f"  {lang}: no spoken text, skipping")
-            continue
+    vectors = embed_texts([passage_text(c) for c in chunks])
+    vectors.tofile(build_dir / "vectors.bin")
+    (build_dir / "index.json").write_text(
+        json.dumps([c["id"] for c in chunks]), encoding="utf-8")
 
-        vectors = embed_texts([passage_text(c, lang) for c in present])
-        vectors.tofile(pack_dir / "build" / f"vectors.{lang}.bin")
-
-        index_path = pack_dir / "build" / f"index.{lang}.json"
-        index_path.write_text(json.dumps([c["id"] for c in present]), encoding="utf-8")
-
-        counts[lang] = len(present)
-        print(f"  {lang}: {len(present)} vectors x {vectors.shape[1]} dims "
-              f"({vectors.nbytes / 1024:.0f} KB)")
-
-    return counts
+    print(f"  {len(chunks)} vectors x {vectors.shape[1]} dims "
+          f"({vectors.nbytes / 1024:.0f} KB)")
+    return len(chunks)
 
 
 if __name__ == "__main__":
-    pack_dir = Path("packs") / sys.argv[1]
-    languages = sys.argv[2].split(",") if len(sys.argv) > 2 else ["en-IN", "hi-IN"]
-    build_vectors(pack_dir, languages)
+    build_vectors(Path("packs") / sys.argv[1])
