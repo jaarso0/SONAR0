@@ -1,6 +1,9 @@
 import worker.patches  # noqa: F401  — must precede livekit plugin imports
 
+import json
 import logging
+import os
+import sys
 import uuid
 from pathlib import Path
 
@@ -17,10 +20,28 @@ from livekit.plugins import openai, sarvam
 from worker import config
 from worker.metrics import TurnRecorder
 from worker.retrieval import FileRetriever
+from worker.verbalize import expand_stream
 
 logger = logging.getLogger("sonar")
 
-PACK_ID = "a7d7c3c1a58a"
+# The per-turn cost line prints ₹, which the default Windows codepage cannot
+# encode — without this the metrics handler raises whenever output is redirected.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+# Used only when a job arrives without metadata, i.e. `python -m worker.agent console`.
+FALLBACK_PACK_ID = os.getenv("SONAR_PACK_ID", "")
+
+
+def pack_id_for_job(ctx: JobContext) -> str:
+    """The API dispatches with {"pack_id": ...}; a bare id is accepted too."""
+    metadata = (ctx.job.metadata or "").strip()
+    if not metadata:
+        return FALLBACK_PACK_ID
+    try:
+        return json.loads(metadata).get("pack_id", "")
+    except json.JSONDecodeError:
+        return metadata
 
 
 def build_llm() -> openai.LLM:
@@ -51,34 +72,48 @@ def build_tts() -> sarvam.TTS:
 
 class SonarAgent(Agent):
     def __init__(self, retriever: FileRetriever, lang: str):
-        super().__init__(instructions=config.PERSONA)
+        super().__init__(instructions=config.PERSONA.format(subject=retriever.subject))
         self.retriever = retriever
         self.lang = lang
 
     async def on_user_turn_completed(self, turn_ctx, new_message) -> None:
         question = new_message.text_content
-        print(">>> HOOK FIRED", repr(question))
         if not question:
             return
 
-        hits = self.retriever.search(question, self.lang, k=3)
-        hits = [h for h in hits if h["score"] > 0.75]
+        hits = self.retriever.search(question,
+                                     k=config.RETRIEVAL_TOP_K,
+                                     min_score=config.RETRIEVAL_MIN_SCORE)
         if not hits:
-            print(">>> no relevant context")
+            logger.info("no context above %.2f for %r", config.RETRIEVAL_MIN_SCORE, question)
             return
-        print(f">>> RETRIEVED {[round(h['score'], 3) for h in hits]}")
 
-        context = "\n".join(h["text"] for h in hits)
+        logger.info("retrieved %s", [round(h["score"], 3) for h in hits])
+
+        context = "\n\n".join(f"{h['heading_path']}\n{h['text']}" for h in hits)
         turn_ctx.add_message(
             role="assistant",
-            content=f"Relevant information from the business:\n{context}",
+            content=f"Reference material about {self.retriever.subject}:\n{context}",
         )
+
+    async def tts_node(self, text, model_settings):
+        """Spell out identifiers for the speech path only — the transcript the
+        caller reads keeps the digits."""
+        expanded = expand_stream(text, hindi=self.lang.startswith("hi"))
+        return Agent.default.tts_node(self, expanded, model_settings)
 
 
 async def entrypoint(ctx: JobContext):
+    pack_id = pack_id_for_job(ctx)
+    if not pack_id:
+        raise RuntimeError(
+            "no pack_id in the job metadata — dispatch from the API, "
+            "or set SONAR_PACK_ID to run this from the console"
+        )
+
     await ctx.connect()
 
-    retriever = FileRetriever(Path("packs") / PACK_ID, ["en-IN", "hi-IN"])
+    retriever = FileRetriever(Path("packs") / pack_id)
     recorder = TurnRecorder(session_id=uuid.uuid4().hex[:8])
 
     session = AgentSession(
@@ -95,7 +130,7 @@ async def entrypoint(ctx: JobContext):
     def on_metrics(ev: MetricsCollectedEvent):
         recorder.collect(ev.metrics)
 
-    await session.start(room=ctx.room, agent=SonarAgent(retriever, "en-IN"))
+    await session.start(room=ctx.room, agent=SonarAgent(retriever, config.LANGUAGE))
 
     await session.generate_reply(
         instructions="Greet the caller in one short sentence and ask how you can help."
