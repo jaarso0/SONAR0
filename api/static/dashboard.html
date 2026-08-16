@@ -1,0 +1,1131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sonar</title>
+  <style>
+    /* ---------- tokens ---------- */
+    :root {
+      --bg:        #0b0b0d;
+      --panel:     #121215;
+      --panel-2:   #17171c;
+      --line:      #26262e;
+      --text:      #e8e8ec;
+      --muted:     #8b8b96;
+      --accent:    #7b8cf7;
+      --accent-dim:#2a2f52;
+      --radius:    12px;
+      --pad:       16px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    button, input, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; background: none; border: 0; }
+
+    ::-webkit-scrollbar       { width: 8px; }
+    ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+
+    /* ---------- layout ---------- */
+    .app {
+      display: grid;
+      grid-template-columns: 260px 1fr 300px;
+      height: 100%;
+    }
+
+    .panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;                 /* lets inner lists scroll */
+      background: var(--panel);
+    }
+
+    .panel--history { border-right: 1px solid var(--line); }
+    .panel--context { border-left:  1px solid var(--line); }
+
+    .panel__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: var(--pad);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel__title {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .panel__body {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 8px;
+    }
+
+    /* ---------- buttons ---------- */
+    .icon-btn {
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      color: var(--muted);
+      transition: background .15s, color .15s;
+    }
+    .icon-btn:hover { background: var(--panel-2); color: var(--text); }
+
+    /* ---------- history list ---------- */
+    .thread {
+      display: block;
+      width: 100%;
+      padding: 10px 12px;
+      margin-bottom: 2px;
+      border-radius: 10px;
+      text-align: left;
+      color: var(--muted);
+      transition: background .15s, color .15s;
+    }
+    .thread:hover        { background: var(--panel-2); color: var(--text); }
+    .thread[aria-current="true"] { background: var(--accent-dim); color: var(--text); }
+
+    .thread__title {
+      display: block;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .thread__meta { font-size: 12px; opacity: .65; }
+
+    /* ---------- chat ---------- */
+    .chat {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: var(--bg);
+    }
+
+    .chat__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--pad);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .chat__title { font-weight: 600; }
+
+    .chat__subject { font-size: 12px; color: var(--muted); }
+
+    .messages {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 24px;
+    }
+
+    .msg {
+      display: flex;
+      margin-bottom: 16px;
+    }
+    .msg--user { justify-content: flex-end; }
+
+    .msg__bubble {
+      max-width: 68ch;
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .msg--user  .msg__bubble { background: var(--accent-dim); }
+    .msg--agent .msg__bubble { background: var(--panel-2); }
+
+    .msg__cite {
+      display: block;
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .empty {
+      display: grid;
+      place-content: center;
+      height: 100%;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    /* ---------- composer ---------- */
+    .composer {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 24px 24px;
+      padding: 8px 8px 8px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+    }
+
+    .composer__input {
+      flex: 1;
+      border: 0;
+      outline: 0;
+      background: none;
+      padding: 6px 4px;
+    }
+    .composer__input::placeholder { color: var(--muted); }
+
+    .composer__send {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #0b0b0d;
+    }
+    .composer__send:disabled { opacity: .35; cursor: default; }
+
+    /* ---------- context / documents ---------- */
+    .doc {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 10px;
+      border-radius: 10px;
+      text-align: left;
+      transition: background .15s;
+    }
+    .doc:hover { background: var(--panel-2); }
+    .doc[aria-current="true"] { background: var(--accent-dim); }
+
+    .doc__icon {
+      flex: none;
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: var(--accent-dim);
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .doc__body { min-width: 0; }
+
+    .doc__name {
+      display: block;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .doc__meta { font-size: 12px; color: var(--muted); }
+
+    .badge {
+      margin-left: auto;
+      flex: none;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      background: var(--panel-2);
+      color: var(--muted);
+    }
+    .badge--ready  { background: var(--accent-dim); color: var(--accent); }
+    .badge--failed { background: #3a1f24; color: #f08a97; }
+
+    /* add-source form */
+    .source-form {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px;
+      margin-bottom: 8px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel-2);
+    }
+    .source-form[hidden] { display: none; }
+
+    .source-form__input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--bg);
+      outline: 0;
+    }
+    .source-form__input:focus { border-color: var(--accent); }
+    .source-form__input::placeholder { color: var(--muted); }
+
+    .source-form__row { display: flex; gap: 8px; }
+
+    .btn {
+      flex: 1;
+      padding: 8px;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #0b0b0d;
+      font-weight: 500;
+    }
+    .btn--ghost { background: var(--panel); color: var(--muted); }
+
+    .hint { font-size: 12px; color: var(--muted); }
+    .hint--error { color: #f08a97; }
+
+    /* ---------- voice overlay ---------- */
+    .voice {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      background: #000;
+      z-index: 10;
+    }
+    .voice[hidden] { display: none; }
+
+    .voice__head {
+      display: flex;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    /* mode switch */
+    .switch {
+      display: flex;
+      gap: 2px;
+      padding: 3px;
+      border-radius: 999px;
+      background: #131318;
+    }
+    .switch__opt {
+      padding: 6px 16px;
+      border-radius: 999px;
+      font-size: 13px;
+      color: var(--muted);
+      transition: background .15s, color .15s;
+    }
+    .switch__opt[aria-pressed="true"] { background: #24242c; color: var(--text); }
+
+    .voice__stage {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      place-items: center;
+      padding: 0 24px;
+    }
+
+    /* orb */
+    .orb {
+      position: relative;
+      width: 275px;
+      height: 275px;
+      border-radius: 50%;
+      overflow: hidden;
+      background: linear-gradient(200deg, #7b8cf7 0%, #97a4f9 34%, #eceefe 62%, #fbfbff 100%);
+      animation: breathe 4s ease-in-out infinite;
+    }
+
+    /* soft moving sheen so the gradient never looks static */
+    .orb::after {
+      content: "";
+      position: absolute;
+      inset: -40%;
+      background: radial-gradient(circle at 30% 70%, rgba(255,255,255,.9), transparent 55%);
+      animation: drift 7s ease-in-out infinite alternate;
+    }
+
+    .orb[data-state="listening"] { animation-duration: 2s; }
+    .orb[data-state="speaking"]  { animation-duration: 1.2s; }
+    .orb[data-state="idle"]      { animation-duration: 6s; }
+
+    @keyframes breathe {
+      0%, 100% { transform: scale(1); }
+      50%      { transform: scale(1.06); }
+    }
+
+    @keyframes drift {
+      from { transform: translate(-6%, 6%) rotate(0deg); }
+      to   { transform: translate(6%, -6%) rotate(25deg); }
+    }
+
+    .orb__caption {
+      margin-top: 28px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    /* transcript */
+    .transcript {
+      width: 100%;
+      max-width: 680px;
+      max-height: 100%;
+      overflow-y: auto;
+      align-self: stretch;
+      padding: 16px 0;
+    }
+
+    .turn { margin-bottom: 18px; }
+
+    .turn__who {
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .turn--agent .turn__who { color: var(--accent); }
+
+    .turn__text { white-space: pre-wrap; }
+
+    /* bottom pill */
+    .voice__bar {
+      display: flex;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .pill {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: min(1010px, 100%);
+      padding: 10px 10px 10px 18px;
+      border-radius: 999px;
+      background: #141418;
+    }
+
+    .pill__input {
+      flex: 1;
+      border: 0;
+      outline: 0;
+      background: none;
+      padding: 6px 0;
+    }
+    .pill__input::placeholder { color: var(--muted); }
+
+    .pill__mic {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 999px;
+      color: var(--text);
+    }
+    .pill__mic[aria-pressed="true"] { color: var(--muted); }
+
+    .pill__end {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      border-radius: 999px;
+      background: #fff;
+      color: #000;
+    }
+
+    /* ---------- responsive ---------- */
+    @media (max-width: 1100px) {
+      .app { grid-template-columns: 220px 1fr; }
+      .panel--context { display: none; }
+    }
+    @media (max-width: 760px) {
+      .app { grid-template-columns: 1fr; }
+      .panel--history { display: none; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+
+    <!-- ---------- left: chat history ---------- -->
+    <aside class="panel panel--history">
+      <div class="panel__head">
+        <span class="panel__title">Chats</span>
+        <button class="icon-btn" id="new-chat" title="New chat" aria-label="New chat">+</button>
+      </div>
+      <div class="panel__body" id="history"></div>
+    </aside>
+
+    <!-- ---------- middle: chat ---------- -->
+    <main class="chat">
+      <header class="chat__head">
+        <div>
+          <div class="chat__title" id="chat-title">—</div>
+          <div class="chat__subject" id="chat-subject"></div>
+        </div>
+        <button class="icon-btn" id="open-voice" title="Start voice call" aria-label="Start voice call">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/>
+          </svg>
+        </button>
+      </header>
+
+      <div class="messages" id="messages"></div>
+
+      <form class="composer" id="composer">
+        <button type="button" class="icon-btn" title="Attach document" aria-label="Attach document">+</button>
+        <input class="composer__input" id="composer-input" placeholder="Ask about this project" autocomplete="off">
+        <button type="submit" class="composer__send" id="composer-send" aria-label="Send" disabled>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+          </svg>
+        </button>
+      </form>
+    </main>
+
+    <!-- ---------- right: project context ---------- -->
+    <aside class="panel panel--context">
+      <div class="panel__head">
+        <span class="panel__title">Context</span>
+        <button class="icon-btn" id="add-doc" title="Add document" aria-label="Add document">+</button>
+      </div>
+      <div class="panel__body">
+        <form class="source-form" id="source-form" hidden>
+          <input class="source-form__input" id="source-url" placeholder="https://example.com"
+                 autocomplete="off">
+          <div class="source-form__row">
+            <button type="submit" class="btn">Crawl</button>
+            <button type="button" class="btn btn--ghost" id="pick-pdf">Upload PDF</button>
+          </div>
+          <span class="hint" id="source-hint">A site to crawl, or a PDF to read.</span>
+          <input type="file" id="pdf-file" accept="application/pdf" hidden>
+        </form>
+        <div id="documents"></div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ---------- voice overlay ---------- -->
+  <div class="voice" id="voice" hidden>
+    <div class="voice__head">
+      <div class="switch" role="group" aria-label="Voice display mode">
+        <button class="switch__opt" data-mode="orb"  aria-pressed="true">Orb</button>
+        <button class="switch__opt" data-mode="text" aria-pressed="false">Transcript</button>
+      </div>
+    </div>
+
+    <div class="voice__stage">
+      <!-- orb mode -->
+      <div id="orb-view">
+        <div class="orb" id="orb" data-state="idle"></div>
+        <div class="orb__caption" id="orb-caption">Listening</div>
+      </div>
+
+      <!-- transcript mode -->
+      <div class="transcript" id="transcript" hidden></div>
+    </div>
+
+    <div class="voice__bar">
+      <div class="pill">
+        <button class="icon-btn" title="Attach" aria-label="Attach">+</button>
+        <input class="pill__input" id="voice-input" placeholder="Type" autocomplete="off">
+        <button class="pill__mic" id="voice-mute" aria-pressed="false" title="Mute" aria-label="Mute">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/>
+            <path d="m2 2 20 20" id="mute-slash" opacity="0"/>
+          </svg>
+        </button>
+        <button class="pill__end" id="voice-end" title="End call" aria-label="End call">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round">
+            <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.20.2/dist/livekit-client.umd.min.js"></script>
+  <script>
+  "use strict";
+
+  /* ------------------------------------------------------------------
+   * State
+   *
+   * Chats and packs come from the API. Messages are per-chat and in-memory
+   * only — the transcript belongs to a live session, not to storage.
+   * ------------------------------------------------------------------ */
+
+  const BUILDING_STAGES = ["queued", "extracting", "chunking", "embedding"];
+
+  const state = {
+    chats: [],
+    activeChatId: null,
+    packs: [],
+    messages: new Map(),   // chat id -> [{ role, text }]
+    voice: {
+      open: false,
+      mode: "orb",        // "orb" | "text"
+      muted: false,
+    },
+    pollTimer: null,
+  };
+
+  /** The live call. `segments` is keyed by lk.segment_id so an interim
+   *  transcription is replaced by its final version rather than duplicated. */
+  const call = {
+    room: null,
+    audio: null,
+    segments: new Map(),   // segment id -> { role, text }
+  };
+
+  const $ = (id) => document.getElementById(id);
+
+  const el = {
+    history:      $("history"),
+    newChat:      $("new-chat"),
+    chatTitle:    $("chat-title"),
+    chatSubject:  $("chat-subject"),
+    messages:     $("messages"),
+    composer:     $("composer"),
+    composerInput:$("composer-input"),
+    composerSend: $("composer-send"),
+    documents:    $("documents"),
+    addDoc:       $("add-doc"),
+    sourceForm:   $("source-form"),
+    sourceUrl:    $("source-url"),
+    sourceHint:   $("source-hint"),
+    pickPdf:      $("pick-pdf"),
+    pdfFile:      $("pdf-file"),
+    openVoice:    $("open-voice"),
+    voice:        $("voice"),
+    orbView:      $("orb-view"),
+    orb:          $("orb"),
+    orbCaption:   $("orb-caption"),
+    transcript:   $("transcript"),
+    voiceInput:   $("voice-input"),
+    voiceMute:    $("voice-mute"),
+    muteSlash:    $("mute-slash"),
+    voiceEnd:     $("voice-end"),
+  };
+
+  const activeChat = () =>
+    state.chats.find((c) => c.id === state.activeChatId) ?? null;
+
+  const packById = (packId) =>
+    state.packs.find((p) => p.pack_id === packId) ?? null;
+
+  const activePack = () => packById(activeChat()?.pack_id);
+
+  const messagesFor = (chatId) => {
+    if (!state.messages.has(chatId)) state.messages.set(chatId, []);
+    return state.messages.get(chatId);
+  };
+
+  /* ------------------------------------------------------------------
+   * API
+   * ------------------------------------------------------------------ */
+
+  async function api(path, options = {}) {
+    const response = await fetch(path, {
+      headers: options.body instanceof FormData ? {} : { "Content-Type": "application/json" },
+      ...options,
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(detail || response.statusText);
+    }
+    return response.status === 204 ? null : response.json();
+  }
+
+  const postJSON = (path, body) =>
+    api(path, { method: "POST", body: JSON.stringify(body) });
+
+  /* ------------------------------------------------------------------
+   * Rendering
+   * ------------------------------------------------------------------ */
+
+  function renderHistory() {
+    el.history.replaceChildren(...state.chats.map((chat) => {
+      const button = document.createElement("button");
+      button.className = "thread";
+      button.setAttribute("aria-current", String(chat.id === state.activeChatId));
+      button.onclick = () => selectChat(chat.id);
+
+      const title = document.createElement("span");
+      title.className = "thread__title";
+      title.textContent = chat.title;
+
+      const meta = document.createElement("span");
+      meta.className = "thread__meta";
+      meta.textContent = packById(chat.pack_id)?.subject ?? "no context";
+
+      button.append(title, meta);
+      return button;
+    }));
+  }
+
+  function renderMessages() {
+    const chat = activeChat();
+    if (!chat) return;
+
+    const pack = activePack();
+    el.chatTitle.textContent = chat.title;
+    el.chatSubject.textContent = pack
+      ? `${pack.subject} · ${stageLabel(pack)}`
+      : "No context attached";
+
+    const ready = pack?.stage === "ready";
+    el.openVoice.disabled = !ready;
+    el.openVoice.title = ready ? "Start voice call" : "Attach a ready pack first";
+
+    const messages = messagesFor(chat.id);
+    if (messages.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = pack
+        ? "Ask a question, or start a voice call."
+        : "Attach a document or site on the right to give this chat context.";
+      el.messages.replaceChildren(empty);
+      return;
+    }
+
+    el.messages.replaceChildren(...messages.map((message) => {
+      const row = document.createElement("div");
+      row.className = `msg msg--${message.role}`;
+
+      const bubble = document.createElement("div");
+      bubble.className = "msg__bubble";
+      bubble.textContent = message.text;
+
+      if (message.cite) {
+        const cite = document.createElement("span");
+        cite.className = "msg__cite";
+        cite.textContent = message.cite;
+        bubble.append(cite);
+      }
+
+      row.append(bubble);
+      return row;
+    }));
+
+    el.messages.scrollTop = el.messages.scrollHeight;
+  }
+
+  /** One line describing where a build is, detailed enough to be worth watching. */
+  function stageLabel(pack) {
+    switch (pack.stage) {
+      case "queued":     return "queued";
+      case "extracting": return pack.pages ? `crawling · ${pack.pages} pages` : "extracting";
+      case "chunking":   return "chunking";
+      case "embedding":  return "embedding";
+      case "ready":      return `${pack.chunks} chunks indexed`;
+      case "failed":     return pack.error ?? "failed";
+      case "incomplete": return "never embedded — rebuild to use";
+      default:           return pack.stage ?? "unknown";
+    }
+  }
+
+  function renderPacks() {
+    if (state.packs.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "hint";
+      empty.style.padding = "10px";
+      empty.textContent = "No context yet. Add a site or a PDF.";
+      el.documents.replaceChildren(empty);
+      return;
+    }
+
+    const attachedId = activeChat()?.pack_id;
+
+    el.documents.replaceChildren(...state.packs.map((pack) => {
+      const row = document.createElement("button");
+      row.className = "doc";
+      row.title = pack.source ?? pack.subject;
+      row.setAttribute("aria-current", String(pack.pack_id === attachedId));
+      row.onclick = () => attachPack(pack.pack_id);
+
+      const icon = document.createElement("span");
+      icon.className = "doc__icon";
+      icon.textContent = pack.source?.toLowerCase().endsWith(".pdf") ? "PDF" : "WEB";
+
+      const body = document.createElement("span");
+      body.className = "doc__body";
+
+      const name = document.createElement("span");
+      name.className = "doc__name";
+      name.textContent = pack.subject ?? pack.pack_id;
+
+      const meta = document.createElement("span");
+      meta.className = "doc__meta";
+      meta.textContent = stageLabel(pack);
+
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      if (pack.stage === "ready")  badge.classList.add("badge--ready");
+      if (pack.stage === "failed") badge.classList.add("badge--failed");
+      badge.textContent = BUILDING_STAGES.includes(pack.stage) ? "building" : pack.stage;
+
+      body.append(name, meta);
+      row.append(icon, body, badge);
+      return row;
+    }));
+  }
+
+  /* ------------------------------------------------------------------
+   * Packs
+   * ------------------------------------------------------------------ */
+
+  async function loadPacks() {
+    state.packs = await api("/api/packs");
+    renderPacks();
+    renderHistory();
+    renderMessages();
+    schedulePoll();
+  }
+
+  /** Poll only while something is building, and stop as soon as nothing is. */
+  function schedulePoll() {
+    const building = state.packs.some((p) => BUILDING_STAGES.includes(p.stage));
+
+    if (building && state.pollTimer === null) {
+      state.pollTimer = setInterval(loadPacks, 2000);
+    } else if (!building && state.pollTimer !== null) {
+      clearInterval(state.pollTimer);
+      state.pollTimer = null;
+    }
+  }
+
+  async function addSource(request) {
+    el.sourceHint.classList.remove("hint--error");
+    el.sourceHint.textContent = "Starting build…";
+    try {
+      const pack = await request();
+      el.sourceForm.hidden = true;
+      el.sourceUrl.value = "";
+      el.sourceHint.textContent = "A site to crawl, or a PDF to read.";
+      await loadPacks();
+      await attachPack(pack.pack_id);          // a new source is what this chat is about
+    } catch (error) {
+      el.sourceHint.classList.add("hint--error");
+      el.sourceHint.textContent = String(error.message).slice(0, 200);
+    }
+  }
+
+  async function attachPack(packId) {
+    const chat = activeChat();
+    if (!chat) return;
+    Object.assign(chat, await api(`/api/chats/${chat.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ pack_id: packId }),
+    }));
+    renderPacks();
+    renderHistory();
+    renderMessages();
+  }
+
+  el.addDoc.onclick = () => {
+    el.sourceForm.hidden = !el.sourceForm.hidden;
+    if (!el.sourceForm.hidden) el.sourceUrl.focus();
+  };
+
+  el.sourceForm.onsubmit = (event) => {
+    event.preventDefault();
+    const source = el.sourceUrl.value.trim();
+    if (source) addSource(() => postJSON("/api/packs", { source }));
+  };
+
+  el.pickPdf.onclick = () => el.pdfFile.click();
+
+  el.pdfFile.onchange = () => {
+    const file = el.pdfFile.files[0];
+    if (!file) return;
+    const form = new FormData();
+    form.append("file", file);
+    el.pdfFile.value = "";
+    addSource(() => api("/api/packs/upload", { method: "POST", body: form }));
+  };
+
+  function renderTranscript() {
+    const turns = [...call.segments.values()];
+
+    if (turns.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "The conversation will appear here.";
+      el.transcript.replaceChildren(empty);
+      return;
+    }
+
+    el.transcript.replaceChildren(...turns.map((turn) => {
+      const row = document.createElement("div");
+      row.className = `turn turn--${turn.role}`;
+
+      const who = document.createElement("div");
+      who.className = "turn__who";
+      who.textContent = turn.role === "user" ? "You" : "Agent";
+
+      const text = document.createElement("div");
+      text.className = "turn__text";
+      text.textContent = turn.text;
+
+      row.append(who, text);
+      return row;
+    }));
+
+    el.transcript.scrollTop = el.transcript.scrollHeight;
+  }
+
+  /* ------------------------------------------------------------------
+   * Chat
+   * ------------------------------------------------------------------ */
+
+  function selectChat(id) {
+    state.activeChatId = id;
+    renderHistory();
+    renderPacks();
+    renderMessages();
+  }
+
+  async function newChat() {
+    const chat = await postJSON("/api/chats", { pack_id: activeChat()?.pack_id ?? null });
+    state.chats.unshift(chat);
+    selectChat(chat.id);
+    el.composerInput.focus();
+  }
+
+  async function renameChat(chat, title) {
+    chat.title = title;
+    renderHistory();
+    await api(`/api/chats/${chat.id}`, { method: "PATCH", body: JSON.stringify({ title }) });
+  }
+
+  function sendMessage(text) {
+    const chat = activeChat();
+    if (chat.title === "New chat") renameChat(chat, text.slice(0, 40));
+
+    // With no call open there is no agent listening, so say so rather than hang.
+    if (!call.room) {
+      messagesFor(chat.id).push(
+        { role: "user", text },
+        { role: "agent", text: "Start a voice call to talk to the agent." },
+      );
+      renderMessages();
+      return;
+    }
+    sendVoiceText(text);
+  }
+
+  el.newChat.onclick = newChat;
+
+  el.composerInput.oninput = () => {
+    el.composerSend.disabled = el.composerInput.value.trim() === "";
+  };
+
+  el.composer.onsubmit = (event) => {
+    event.preventDefault();
+    const text = el.composerInput.value.trim();
+    if (!text) return;
+    el.composerInput.value = "";
+    el.composerSend.disabled = true;
+    sendMessage(text);
+  };
+
+  /* ------------------------------------------------------------------
+   * Voice
+   *
+   * One LiveKit room per call. The API dispatches the agent onto it with
+   * this chat's pack, so which pack answers is decided per session.
+   * The orb and the transcript are two views of that same room.
+   * ------------------------------------------------------------------ */
+
+  const LK = window.LivekitClient;
+
+  const ORB_CAPTIONS = {
+    idle:       "Muted",
+    connecting: "Connecting",
+    listening:  "Listening",
+    speaking:   "Speaking",
+  };
+
+  function setOrbState(nextState, caption) {
+    el.orb.dataset.state = nextState === "connecting" ? "idle" : nextState;
+    el.orbCaption.textContent = caption ?? ORB_CAPTIONS[nextState] ?? "";
+  }
+
+  function setVoiceMode(mode) {
+    state.voice.mode = mode;
+
+    for (const option of document.querySelectorAll(".switch__opt")) {
+      option.setAttribute("aria-pressed", String(option.dataset.mode === mode));
+    }
+
+    el.orbView.hidden    = mode !== "orb";
+    el.transcript.hidden = mode !== "text";
+
+    if (mode === "text") renderTranscript();
+  }
+
+  /** Each stream carries one segment; later streams for the same segment id
+   *  overwrite it, so interim text is corrected in place. */
+  async function readTranscription(reader, participant) {
+    const attributes = reader.info.attributes ?? {};
+    const segmentId = attributes["lk.segment_id"] ?? reader.info.id;
+    const role = participant.identity === call.room?.localParticipant.identity
+      ? "user"
+      : "agent";
+
+    let text = "";
+    for await (const chunk of reader) {
+      text += chunk;
+      call.segments.set(segmentId, { role, text });
+      if (state.voice.mode === "text") renderTranscript();
+    }
+    renderTranscript();
+  }
+
+  async function connect({ url, token }) {
+    const room = new LK.Room({ adaptiveStream: false, dynacast: false });
+    call.room = room;
+
+    room.registerTextStreamHandler("lk.transcription", readTranscription);
+
+    room
+      .on(LK.RoomEvent.TrackSubscribed, (track) => {
+        if (track.kind !== LK.Track.Kind.Audio) return;
+        call.audio = track.attach();       // must be in the DOM to play reliably
+        call.audio.autoplay = true;
+        document.body.append(call.audio);
+      })
+      .on(LK.RoomEvent.ActiveSpeakersChanged, (speakers) => {
+        const agentSpeaking = speakers.some(
+          (p) => p.identity !== room.localParticipant.identity);
+        if (agentSpeaking) setOrbState("speaking");
+        else setOrbState(state.voice.muted ? "idle" : "listening");
+      })
+      .on(LK.RoomEvent.Disconnected, () => {
+        if (state.voice.open) closeVoice();
+      });
+
+    await room.connect(url, token);
+    await room.localParticipant.setMicrophoneEnabled(true);
+    setOrbState("listening");
+  }
+
+  async function openVoice() {
+    const chat = activeChat();
+    if (!chat || activePack()?.stage !== "ready") return;
+
+    state.voice.open = true;
+    state.voice.muted = false;
+    call.segments.clear();
+
+    el.voice.hidden = false;
+    el.voiceMute.setAttribute("aria-pressed", "false");
+    el.muteSlash.setAttribute("opacity", "0");
+    setVoiceMode(state.voice.mode);
+    setOrbState("connecting");
+    renderTranscript();
+
+    try {
+      await connect(await postJSON("/api/sessions", { chat_id: chat.id }));
+      el.voiceInput.focus();
+    } catch (error) {
+      setOrbState("idle", String(error.message).slice(0, 160));
+    }
+  }
+
+  async function closeVoice() {
+    state.voice.open = false;
+    el.voice.hidden = true;
+
+    const room = call.room;
+    call.room = null;
+    call.audio?.remove();
+    call.audio = null;
+    await room?.disconnect();
+
+    // The call *is* the conversation — keep it in the chat it belonged to.
+    const chat = activeChat();
+    if (chat && call.segments.size > 0) {
+      messagesFor(chat.id).push(...call.segments.values());
+      renderMessages();
+    }
+  }
+
+  async function toggleMute() {
+    state.voice.muted = !state.voice.muted;
+    el.voiceMute.setAttribute("aria-pressed", String(state.voice.muted));
+    el.muteSlash.setAttribute("opacity", state.voice.muted ? "1" : "0");
+    setOrbState(state.voice.muted ? "idle" : "listening");
+    await call.room?.localParticipant.setMicrophoneEnabled(!state.voice.muted);
+  }
+
+  /** Typed text goes to the agent on the topic it already listens to. */
+  async function sendVoiceText(text) {
+    call.segments.set(`typed-${Date.now()}`, { role: "user", text });
+    renderTranscript();
+    await call.room?.localParticipant.sendText(text, { topic: "lk.chat" });
+  }
+
+  el.openVoice.onclick = openVoice;
+  el.voiceEnd.onclick  = closeVoice;
+  el.voiceMute.onclick = toggleMute;
+
+  for (const option of document.querySelectorAll(".switch__opt")) {
+    option.onclick = () => setVoiceMode(option.dataset.mode);
+  }
+
+  el.voiceInput.onkeydown = (event) => {
+    if (event.key !== "Enter") return;
+    const text = el.voiceInput.value.trim();
+    if (!text || !call.room) return;
+    el.voiceInput.value = "";
+    sendVoiceText(text);
+  };
+
+  document.onkeydown = (event) => {
+    if (event.key === "Escape" && state.voice.open) closeVoice();
+  };
+
+  /* ------------------------------------------------------------------
+   * Startup
+   * ------------------------------------------------------------------ */
+
+  async function load() {
+    state.chats = await api("/api/chats");
+    if (state.chats.length === 0) {
+      state.chats = [await postJSON("/api/chats", {})];
+    }
+    state.activeChatId = state.chats[0].id;
+
+    renderHistory();
+    renderMessages();
+    await loadPacks();
+  }
+
+  load().catch((error) => {
+    el.messages.replaceChildren(
+      Object.assign(document.createElement("div"), {
+        className: "empty",
+        textContent: `Could not reach the API: ${error.message}`,
+      }),
+    );
+  });
+</script>
+</body>
+</html>
