@@ -15,11 +15,14 @@ import sys
 import time
 from pathlib import Path
 
-from pipeline.chunk import build_chunks
+from pipeline.chunk import build_chunks, garbled_fraction
 from pipeline.embed import build_vectors
 from pipeline.extract import CrawlLimits, crawl, extract_pdf, normalize_domain
 
 PACKS_DIR = Path("packs")
+
+# Above this share of mis-decoded tokens a pack is not worth indexing.
+MAX_GARBLED = 0.25
 
 # Stages a build passes through, in order. "ready" and "failed" are terminal.
 STAGES = ["extracting", "chunking", "embedding", "ready"]
@@ -140,7 +143,15 @@ async def build_pack(source: str, max_pages: int = 40, verbose: bool = False) ->
         if not chunks:
             return fail("no usable chunks produced")
 
-        stage("embedding", chunks=len(chunks))
+        # Indexing mis-decoded text produces a pack that answers confidently
+        # from noise, so refuse it here rather than at call time.
+        garbled = garbled_fraction(chunks)
+        if garbled > MAX_GARBLED:
+            return fail(
+                f"{garbled:.0%} of the extracted text is unreadable — this PDF likely "
+                "uses a legacy non-Unicode Indic font and needs OCR")
+
+        stage("embedding", chunks=len(chunks), garbled=round(garbled, 3))
         vectors = await asyncio.to_thread(build_vectors, pack_dir)
         if not vectors:
             return fail("no vectors written")

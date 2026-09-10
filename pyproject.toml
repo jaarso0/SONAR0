@@ -18,7 +18,9 @@ dependencies = [
     # api
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    "python-multipart>=0.0.9",
     "livekit-agents[sarvam,silero,turn-detector,openai]~=1.6",
+    "sarvamai>=0.1.32",
 ]
 
 [dependency-groups]

@@ -89,3 +89,21 @@ def build_chunks(pack_dir: Path) -> list[dict]:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(all_chunks, ensure_ascii=False, indent=2), encoding="utf-8")
     return all_chunks
+
+# Legacy Indic fonts (NeoNilesh, Kruti Dev, Shree Lipi) map Devanagari glyphs into
+# the ASCII range with no ToUnicode table, so extraction yields tokens like
+# "uƒtΩÆÁ¬Æ" — Latin letters mixed with Latin-1 supplement and modifier marks.
+# Real prose, in any language, does not mix those inside a word.
+SUSPECT_CHARS = re.compile(r"[\u00A1-\u00FF\u0100-\u024F\u02B0-\u02FF\u25A0-\u25FF]")
+HAS_LATIN = re.compile(r"[A-Za-z]")
+
+
+def garbled_fraction(chunks: list[dict]) -> float:
+    """Share of Latin-bearing tokens that look like mis-decoded glyphs.
+
+    Healthy packs measure under 1%; a PDF in a legacy font measures around 70%.
+    """
+    tokens = [t for chunk in chunks for t in chunk["source"].split() if HAS_LATIN.search(t)]
+    if not tokens:
+        return 0.0
+    return sum(1 for t in tokens if SUSPECT_CHARS.search(t)) / len(tokens)

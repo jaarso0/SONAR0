@@ -52,7 +52,7 @@ class TurnRecorder:
             self._flush(metric.speech_id)
 
         elif isinstance(metric, lk_metrics.STTMetrics):
-            bucket = self._bucket(metric.speech_id or "stt")
+            bucket = self._bucket(getattr(metric, "speech_id", None) or "stt")
             bucket["stt_audio_seconds"] = round(metric.audio_duration, 2)
 
     def _flush(self, speech_id: str) -> None:
